@@ -261,7 +261,7 @@ PAYWALL_HTML = """\
   <div id="paywallModal">
     <div class="pm-lock">🔒</div>
     <div class="pm-title">0DTE ORACLE PRO</div>
-    <div class="pm-sub" id="pmSub">YOUR FREE PREVIEW HAS ENDED</div>
+    <div class="pm-sub">YOUR FREE PREVIEW HAS ENDED</div>
     <ul class="pm-features">
       <li>Pattern Recognition</li>
       <li>ML Signal Engine</li>
@@ -274,25 +274,13 @@ PAYWALL_HTML = """\
     </ul>
     <div class="pm-price">$15<span style="font-size:16px;color:var(--t3)">/mo</span></div>
     <div class="pm-period">CANCEL ANYTIME · SECURE STRIPE CHECKOUT</div>
-
-    <!-- Shown to logged-in users -->
-    <button class="pm-btn" id="upgradeBtn" onclick="startCheckout()" style="display:none">
-      ⚡ UPGRADE TO PRO — $15/mo
+    <button class="pm-btn" id="upgradeBtn" onclick="startCheckout()">
+      ⚡ UPGRADE TO PRO
     </button>
-
-    <!-- Shown to guests (not logged in) -->
-    <a href="/login" id="googleSignInBtn" class="pm-btn"
-       style="display:flex;align-items:center;justify-content:center;gap:10px;text-decoration:none">
-      <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-        <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
-        <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
-        <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/>
-        <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/>
-      </svg>
-      SIGN IN WITH GOOGLE TO UPGRADE
-    </a>
-
     <div class="pm-guarantee">30-day money-back guarantee · No lock-in</div>
+    <div class="pm-login-link" id="pmLoginLink" style="display:none">
+      Already subscribed? <a href="/login">Sign in</a>
+    </div>
     <div style="margin-top:12px;font-family:var(--font-mono);font-size:9px;color:var(--t3);letter-spacing:.5px">
       Questions? <a href="mailto:marketgurus8@gmail.com" style="color:var(--ice);text-decoration:none">marketgurus8@gmail.com</a>
     </div>
@@ -418,25 +406,8 @@ PAYWALL_JS = """\
       // Welcome back message
       const urlP = new URLSearchParams(location.search);
       if (urlP.get('welcome') === '1') showWelcomeToast();
-
-    } else if (me.authenticated) {
-      // ── LOGGED IN FREE USER — show upgrade button ─────────
-      const upgradeBtn   = document.getElementById('upgradeBtn');
-      const googleBtn    = document.getElementById('googleSignInBtn');
-      if (upgradeBtn) upgradeBtn.style.display = 'block';
-      if (googleBtn)  googleBtn.style.display  = 'none';
-      startPreview();
-
     } else {
-      // ── GUEST (not logged in) — show Google sign-in ───────
-      const upgradeBtn   = document.getElementById('upgradeBtn');
-      const googleBtn    = document.getElementById('googleSignInBtn');
-      const sub          = document.getElementById('pmSub');
-      if (upgradeBtn) upgradeBtn.style.display = 'none';
-      if (googleBtn)  googleBtn.style.display  = 'flex';
-      if (sub) sub.textContent = 'SIGN IN TO UNLOCK ALL FEATURES';
-      // Hide nav badge for guests
-      if (badge) badge.style.display = 'none';
+      // ── FREE USER — start preview countdown ───────────────
       startPreview();
     }
   }
@@ -504,10 +475,6 @@ PAYWALL_JS = """\
 
   // ── Stripe checkout ───────────────────────────────────────
   window.startCheckout = async function() {
-    // If not logged in, send to Google login first
-    const meCheck = await fetch('/me', { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({}));
-    if (!meCheck.authenticated) { window.location.href = '/login'; return; }
-
     const btn = document.getElementById('upgradeBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'REDIRECTING…'; }
     try {
@@ -520,7 +487,7 @@ PAYWALL_JS = """\
       const { url } = await r.json();
       window.location.href = url;
     } catch(e) {
-      if (btn) { btn.disabled = false; btn.textContent = '⚡ UPGRADE TO PRO — $15/mo'; }
+      if (btn) { btn.disabled = false; btn.textContent = '⚡ UPGRADE TO PRO'; }
       alert('Checkout error: ' + e.message);
     }
   };

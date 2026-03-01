@@ -218,12 +218,7 @@ async def logout(req: Request):
 @app.get("/me")
 async def me(req: Request):
     s = auth_session(req)
-    if not s: return JSONResponse({
-        "authenticated":   False,
-        "premium":         False,
-        "stripe_pub_key":  STRIPE_PUB_KEY,
-        "preview_seconds": PREVIEW_SECONDS,
-    })
+    if not s: return JSONResponse({"authenticated": False, "premium": False})
     row = await db_get(s["email"])
     return JSONResponse({
         "authenticated":  True,
@@ -238,8 +233,7 @@ async def me(req: Request):
 # ── Dashboard ─────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(req: Request):
-    # No auth gate — everyone sees the dashboard
-    # Unauthenticated users get 60s preview, then paywall with Google login
+    if not auth_session(req): return RedirectResponse("/login?next=/", 302)
     return HTMLResponse(get_html())
 
 # ── Stripe: create checkout session ──────────────────────────────────
@@ -506,7 +500,7 @@ async def yf_fetch_chart(sym: str, interval: str, range_: str) -> dict:
 @app.get("/api/yf")
 async def yf_proxy(req: Request, sym: str = Query(...),
                    interval: str = Query("5m"), range: str = Query("30d")):
-    # Allow unauthenticated — guests need data during 60s preview
+    require_api_auth(req)
     k = f"{sym}|{interval}|{range}"; ttl = 300 if interval in ("1d","1wk") else 30
     if (c := _yfc.get(k)) and time.time()-c[0] < ttl:
         return JSONResponse(c[1])
@@ -517,7 +511,7 @@ async def yf_proxy(req: Request, sym: str = Query(...),
 
 @app.get("/api/internals")
 async def internals(req: Request):
-    # Allow unauthenticated — guests need data during 60s preview
+    require_api_auth(req)
     if (c := _yfc.get("int")) and time.time()-c[0] < 60:
         return JSONResponse(c[1])
     SYMS = {"QQQ":"QQQ","IWM":"IWM","VIX":"%5EVIX","GLD":"GLD","TLT":"TLT","NVDA":"NVDA","TSLA":"TSLA"}
