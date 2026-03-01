@@ -35,8 +35,7 @@ STRIPE_WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
 BASE_URL              = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 ALLOWED_EMAILS        = {e.strip().lower() for e in os.environ.get("ALLOWED_EMAILS","").split(",") if e.strip()}
 DB_PATH               = os.environ.get("DB_PATH", str(Path(__file__).parent / "oracle.db"))
-PREVIEW_SECONDS       = int(os.environ.get("PREVIEW_SECONDS", "60"))   # logged-in free user
-PREVIEW_SECONDS_GUEST = int(os.environ.get("PREVIEW_SECONDS_GUEST", "180"))  # guest (not logged in)
+PREVIEW_SECONDS       = int(os.environ.get("PREVIEW_SECONDS", "60"))
 
 STRIPE_API  = "https://api.stripe.com/v1"
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -223,7 +222,7 @@ async def me(req: Request):
         "authenticated":   False,
         "premium":         False,
         "stripe_pub_key":  STRIPE_PUB_KEY,
-        "preview_seconds": PREVIEW_SECONDS_GUEST,
+        "preview_seconds": PREVIEW_SECONDS,
     })
     row = await db_get(s["email"])
     return JSONResponse({

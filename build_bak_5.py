@@ -420,30 +420,24 @@ PAYWALL_JS = """\
       if (urlP.get('welcome') === '1') showWelcomeToast();
 
     } else if (me.authenticated) {
-      // ── LOGGED IN FREE USER — 2 min preview → upgrade ─────
-      const upgradeBtn = document.getElementById('upgradeBtn');
-      const googleBtn  = document.getElementById('googleSignInBtn');
-      const sub        = document.getElementById('pmSub');
+      // ── LOGGED IN FREE USER — show upgrade button ─────────
+      const upgradeBtn   = document.getElementById('upgradeBtn');
+      const googleBtn    = document.getElementById('googleSignInBtn');
       if (upgradeBtn) upgradeBtn.style.display = 'block';
       if (googleBtn)  googleBtn.style.display  = 'none';
-      if (sub) sub.textContent = 'YOUR FREE PREVIEW HAS ENDED';
-      startPreview();  // uses preview_seconds from /me (2 min = 120s)
+      startPreview();
 
     } else {
-      // ── GUEST — 3 min preview → sign in with Google ───────
-      const upgradeBtn = document.getElementById('upgradeBtn');
-      const googleBtn  = document.getElementById('googleSignInBtn');
-      const sub        = document.getElementById('pmSub');
-      const bannerText = document.querySelector('.pb-text');
+      // ── GUEST (not logged in) — show Google sign-in ───────
+      const upgradeBtn   = document.getElementById('upgradeBtn');
+      const googleBtn    = document.getElementById('googleSignInBtn');
+      const sub          = document.getElementById('pmSub');
       if (upgradeBtn) upgradeBtn.style.display = 'none';
       if (googleBtn)  googleBtn.style.display  = 'flex';
       if (sub) sub.textContent = 'SIGN IN TO UNLOCK ALL FEATURES';
+      // Hide nav badge for guests
       if (badge) badge.style.display = 'none';
-      // Update banner text for guest
-      if (bannerText) bannerText.innerHTML =
-        '⚡ FREE PREVIEW — Sign in to unlock full access in <span id="previewTimer">'
-        + _previewSeconds + '</span>s';
-      startPreview();  // uses preview_seconds from /me (3 min = 180s)
+      startPreview();
     }
   }
 
@@ -453,15 +447,11 @@ PAYWALL_JS = """\
     const timerEl = document.getElementById('previewTimer');
     if (banner)  { banner.style.display = 'flex'; banner.classList.add('active'); }
     if (timerEl) timerEl.textContent = _previewSeconds;
-    // Update timer reference in banner (guest has different banner text)
-    const allTimers = document.querySelectorAll('#previewTimer');
-    allTimers.forEach(t => t.textContent = _previewSeconds);
 
     let remaining = _previewSeconds;
     _countdownInterval = setInterval(() => {
       remaining -= 1;
       if (timerEl) timerEl.textContent = Math.max(0, remaining);
-      document.querySelectorAll('#previewTimer').forEach(t => t.textContent = Math.max(0, remaining));
       if (remaining <= 10 && timerEl) timerEl.style.color = 'var(--plasma)';
       if (remaining <= 0) {
         clearInterval(_countdownInterval);
