@@ -367,13 +367,12 @@ PAYWALL_JS = """\
     '#recBox',             // trade recommendation box
   ];
 
-  let _previewSeconds  = 60;
-  let _isPremium       = false;
-  let _isAuthenticated = false;
-  let _previewTimer    = null;
+  let _previewSeconds = 60;
+  let _isPremium      = false;
+  let _previewTimer   = null;
   let _countdownInterval = null;
-  let _previewActive   = false;
-  let _previewEnded    = false;
+  let _previewActive  = false;
+  let _previewEnded   = false;
 
   // ── Init: fetch /me, decide free vs premium ────────────────
   async function initPaywall() {
@@ -408,31 +407,44 @@ PAYWALL_JS = """\
     if (me.stripe_pub_key) window._stripeKey = me.stripe_pub_key;
 
     if (_isPremium) {
-      // ── PREMIUM USER ─ show badge, unlock everything ──────
+      // ── PREMIUM USER — show badge, no paywall ─────────────
       if (premBadge) premBadge.style.display = 'inline';
       if (manageBtn) manageBtn.style.display  = 'inline-block';
-      if (badge)     badge.style.display      = 'flex';
       const _pb = document.getElementById('previewBanner');
       if (_pb) { _pb.style.display = 'none'; _pb.classList.remove('active'); }
       unlockAll();
+      // Poll to detect cancellation (every 5 min)
       setInterval(recheckPremium, 5 * 60 * 1000);
+
+      // Welcome back message
       const urlP = new URLSearchParams(location.search);
       if (urlP.get('welcome') === '1') showWelcomeToast();
 
+    } else if (me.authenticated) {
+      // ── LOGGED IN FREE USER — 2 min preview → upgrade ─────
+      const upgradeBtn = document.getElementById('upgradeBtn');
+      const googleBtn  = document.getElementById('googleSignInBtn');
+      const sub        = document.getElementById('pmSub');
+      if (upgradeBtn) upgradeBtn.style.display = 'block';
+      if (googleBtn)  googleBtn.style.display  = 'none';
+      if (sub) sub.textContent = 'YOUR FREE PREVIEW HAS ENDED';
+      startPreview();  // uses preview_seconds from /me (2 min = 120s)
+
     } else {
-      // ── EVERYONE ELSE (guest OR logged-in free) — 3 min preview ──
-      // After 3 min: if not logged in → show Google login button
-      //              if logged in     → show Stripe upgrade button
-      // The paywall modal decides which button to show based on auth state at endPreview time.
-      _isAuthenticated = !!me.authenticated;
-
-      // Show nav badge only if logged in
-      if (badge) badge.style.display = me.authenticated ? 'flex' : 'none';
-
-      // Pre-configure paywall buttons (will be shown when timer ends)
-      setPaywallButtons(me.authenticated);
-
-      startPreview();
+      // ── GUEST — 3 min preview → sign in with Google ───────
+      const upgradeBtn = document.getElementById('upgradeBtn');
+      const googleBtn  = document.getElementById('googleSignInBtn');
+      const sub        = document.getElementById('pmSub');
+      const bannerText = document.querySelector('.pb-text');
+      if (upgradeBtn) upgradeBtn.style.display = 'none';
+      if (googleBtn)  googleBtn.style.display  = 'flex';
+      if (sub) sub.textContent = 'SIGN IN TO UNLOCK ALL FEATURES';
+      if (badge) badge.style.display = 'none';
+      // Update banner text for guest
+      if (bannerText) bannerText.innerHTML =
+        '⚡ FREE PREVIEW — Sign in to unlock full access in <span id="previewTimer">'
+        + _previewSeconds + '</span>s';
+      startPreview();  // uses preview_seconds from /me (3 min = 180s)
     }
   }
 
@@ -466,24 +478,6 @@ PAYWALL_JS = """\
     if (banner) { banner.style.display = 'none'; banner.classList.remove('active'); }
     lockPremiumPanels();
     showPaywall();
-  }
-
-  // ── Configure paywall modal buttons based on auth state ────
-  function setPaywallButtons(isAuthenticated) {
-    const upgradeBtn = document.getElementById('upgradeBtn');
-    const googleBtn  = document.getElementById('googleSignInBtn');
-    const sub        = document.getElementById('pmSub');
-    if (isAuthenticated) {
-      // Logged in but not premium → show Stripe checkout button
-      if (upgradeBtn) upgradeBtn.style.display = 'block';
-      if (googleBtn)  googleBtn.style.display  = 'none';
-      if (sub) sub.textContent = 'UPGRADE TO UNLOCK ALL FEATURES';
-    } else {
-      // Not logged in → show Google sign-in button
-      if (upgradeBtn) upgradeBtn.style.display = 'none';
-      if (googleBtn)  googleBtn.style.display  = 'flex';
-      if (sub) sub.textContent = 'SIGN IN TO UNLOCK ALL FEATURES';
-    }
   }
 
   // ── Lock: blur premium panels ─────────────────────────────
@@ -547,14 +541,12 @@ PAYWALL_JS = """\
     window.location.href = '/stripe/portal';
   };
 
-  // ── Re-check premium/auth status ────────────────────────────
+  // ── Re-check premium status (after returning from Stripe) ─
   async function recheckPremium() {
     try {
       const r  = await fetch('/me', { credentials: 'same-origin' });
       if (!r.ok) return;
       const me = await r.json();
-
-      // Just upgraded to premium
       if (me.premium && !_isPremium) {
         _isPremium = true;
         unlockAll();
@@ -563,31 +555,11 @@ PAYWALL_JS = """\
         if (_pb2) { _pb2.style.display = 'none'; _pb2.classList.remove('active'); }
         if (_countdownInterval) { clearInterval(_countdownInterval); _countdownInterval = null; }
         const b = document.getElementById('premiumBadgeNav');
-        const mgmt = document.getElementById('manageSubBtn');
-        const bdg  = document.getElementById('oracleUserBadge');
-        if (b)    b.style.display    = 'inline';
-        if (mgmt) mgmt.style.display = 'inline-block';
-        if (bdg)  bdg.style.display  = 'flex';
+        if (b) b.style.display = 'inline';
         showWelcomeToast();
-
-      // Subscription cancelled
       } else if (!me.premium && _isPremium) {
         _isPremium = false;
         window.location.reload();
-
-      // Just logged in (was guest, now authenticated) — swap buttons
-      } else if (me.authenticated && !_isAuthenticated) {
-        _isAuthenticated = true;
-        const bdg  = document.getElementById('oracleUserBadge');
-        const avatar = document.getElementById('oracleAvatar');
-        const uname  = document.getElementById('oracleUserName');
-        const premBadge = document.getElementById('premiumBadgeNav');
-        if (bdg)    bdg.style.display    = 'flex';
-        if (avatar && me.picture) avatar.src = me.picture;
-        if (uname)  uname.textContent    = me.name || me.email || '';
-        if (premBadge) premBadge.style.display = 'none';
-        // If paywall is open, swap Google button → Stripe button
-        setPaywallButtons(true);
       }
     } catch(e) {}
   }
