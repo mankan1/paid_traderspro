@@ -668,10 +668,7 @@ OLD_LOAD_INIT = """  // Try connecting to local yf_proxy.py (optional — enhanc
   }, 3000);"""
 
 NEW_LOAD_INIT = """  // Hosted on Railway — no local proxy, go straight to direct YF mode
-  _yfDirectMode();
-
-  // Auto-load AAPL daily on startup
-  setTimeout(() => ibkrLoad(), 300);"""
+  _yfDirectMode();"""
 
 if OLD_LOAD_INIT in html:
     html = html.replace(OLD_LOAD_INIT, NEW_LOAD_INIT)
