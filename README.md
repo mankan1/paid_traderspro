@@ -1,3 +1,6 @@
+check pro status
+https://traderspro-production.up.railway.app/admin?secret=0ca181d4fe0300d1
+
 # 0DTE Oracle — Web Deployment Guide
 
 Dashboard with Google login, hosted on Railway (or Vercel/any Python host).
