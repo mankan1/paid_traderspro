@@ -34,7 +34,6 @@ STRIPE_PRICE_ID       = os.environ["STRIPE_PRICE_ID"]
 STRIPE_WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
 BASE_URL              = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 ALLOWED_EMAILS        = {e.strip().lower() for e in os.environ.get("ALLOWED_EMAILS","").split(",") if e.strip()}
-ADMIN_EMAILS          = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS","").split(",") if e.strip()}
 DB_PATH               = os.environ.get("DB_PATH", str(Path(__file__).parent / "oracle.db"))
 PREVIEW_SECONDS = int(os.environ.get("PREVIEW_SECONDS", "180"))  # 3 min preview for all users
 
@@ -106,14 +105,6 @@ async def db_revoke_premium(email):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE users SET is_premium=0, subscription_id=NULL WHERE email=?", (email,))
-        await db.commit()
-
-async def db_grant_permanent_premium(email):
-    """Grant permanent Pro (no expiry) — used for admin/owner accounts."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE users SET is_premium=1, subscription_id='permanent', "
-            "subscription_end=NULL WHERE email=?", (email,))
         await db.commit()
 
 def premium_active(row) -> bool:
@@ -215,10 +206,6 @@ async def callback(req: Request, code: str = Query(...), state: str = Query("/")
     if ALLOWED_EMAILS and email not in ALLOWED_EMAILS:
         return HTMLResponse(f"<h2>Access denied: {email}</h2>", 403)
     await db_upsert(email, name, pic)
-    # Auto-grant permanent Pro for owner/admin accounts
-    if email in ADMIN_EMAILS:
-        await db_grant_permanent_premium(email)
-        log.info(f"Admin auto-granted permanent Pro: {email}")
     req.session["user"] = {"email": email, "name": name, "picture": pic}
     log.info(f"Login: {email}")
     return RedirectResponse(state if state.startswith("/") else "/", 302)
@@ -359,150 +346,9 @@ async def webhook(req: Request):
     return JSONResponse({"ok": True})
 
 # ── Admin endpoints ──────────────────────────────────────────────────
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_ui(req: Request, secret: str = Query(...)):
-    """Full admin panel — /admin?secret=FIRST16CHARS_OF_SECRET_KEY"""
-    if secret != SECRET_KEY[:16]:
-        raise HTTPException(403, "Forbidden")
-    import datetime
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT email, name, picture, is_premium, stripe_customer_id, "
-            "subscription_id, subscription_end, created_at FROM users ORDER BY created_at DESC"
-        ) as cur:
-            rows = [dict(r) for r in await cur.fetchall()]
-
-    def fmt_ts(ts):
-        if not ts: return "—"
-        return datetime.datetime.fromtimestamp(int(ts), tz=datetime.timezone.utc).strftime("%Y-%m-%d")
-
-    def badge(row):
-        if not row["is_premium"]: return '<span style="color:#ef4444">Free</span>'
-        sub = row.get("subscription_id","")
-        end = row.get("subscription_end")
-        if sub == "permanent": return '<span style="color:#a78bfa">♾ Permanent</span>'
-        if sub == "manual":    return f'<span style="color:#fb923c">Manual ({fmt_ts(end)})</span>'
-        return f'<span style="color:#22c55e">Pro ({fmt_ts(end)})</span>'
-
-    rows_html = ""
-    for r in rows:
-        pic = f'<img src="{r["picture"]}" style="width:28px;height:28px;border-radius:50%;vertical-align:middle;margin-right:8px">' if r.get("picture") else ""
-        admin_star = " ⭐" if r["email"] in ADMIN_EMAILS else ""
-        rows_html += f"""
-        <tr>
-          <td>{pic}{r["email"]}{admin_star}</td>
-          <td>{r.get("name","")}</td>
-          <td>{badge(r)}</td>
-          <td style="color:#64748b;font-size:12px">{r.get("stripe_customer_id","")[:16] or "—"}</td>
-          <td style="color:#64748b;font-size:12px">{fmt_ts(r.get("created_at"))}</td>
-          <td>
-            <button onclick="grantPro('{r['email']}')" style="background:#22c55e;color:#000;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;margin-right:4px;font-size:12px">Grant Pro</button>
-            <button onclick="revokePro('{r['email']}')" style="background:#ef4444;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">Revoke</button>
-          </td>
-        </tr>"""
-
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Oracle Admin</title>
-  <style>
-    * {{ box-sizing: border-box; margin: 0; padding: 0 }}
-    body {{ background: #0f172a; color: #e2e8f0; font-family: 'JetBrains Mono', monospace, sans-serif; padding: 32px }}
-    h1 {{ color: #a78bfa; margin-bottom: 8px; font-size: 22px }}
-    .subtitle {{ color: #64748b; margin-bottom: 28px; font-size: 13px }}
-    table {{ width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden }}
-    th {{ background: #1e293b; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; padding: 12px 16px; text-align: left; border-bottom: 1px solid #334155 }}
-    td {{ padding: 12px 16px; border-bottom: 1px solid #1e293b; font-size: 13px; vertical-align: middle }}
-    tr:hover td {{ background: #243246 }}
-    .grant-form {{ background: #1e293b; border-radius: 8px; padding: 20px; margin-bottom: 28px; display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap }}
-    .grant-form label {{ color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 6px }}
-    .grant-form input {{ background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 280px }}
-    .grant-form select {{ background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 8px 12px; border-radius: 6px; font-size: 14px }}
-    .grant-form button {{ background: #7c3aed; color: #fff; border: none; padding: 9px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold }}
-    .grant-form button:hover {{ background: #6d28d9 }}
-    #toast {{ position: fixed; bottom: 24px; right: 24px; background: #22c55e; color: #000; padding: 12px 20px; border-radius: 8px; font-weight: bold; display: none; z-index: 999 }}
-    .stat {{ display: inline-block; background: #1e293b; border-radius: 8px; padding: 16px 24px; margin-right: 16px; margin-bottom: 24px; text-align: center }}
-    .stat .n {{ font-size: 28px; font-weight: bold; color: #a78bfa }}
-    .stat .l {{ font-size: 12px; color: #64748b; margin-top: 4px }}
-  </style>
-</head>
-<body>
-  <h1>🔮 Oracle Admin</h1>
-  <p class="subtitle">Manage Pro access · secret prefix: {SECRET_KEY[:4]}****</p>
-
-  <div>
-    <div class="stat"><div class="n">{len(rows)}</div><div class="l">Total Users</div></div>
-    <div class="stat"><div class="n">{sum(1 for r in rows if r["is_premium"])}</div><div class="l">Pro Users</div></div>
-    <div class="stat"><div class="n">{sum(1 for r in rows if not r["is_premium"])}</div><div class="l">Free Users</div></div>
-    <div class="stat"><div class="n">{sum(1 for r in rows if r["email"] in ADMIN_EMAILS)}</div><div class="l">Admins</div></div>
-  </div>
-
-  <div class="grant-form">
-    <div>
-      <label>Email address</label>
-      <input id="grantEmail" type="email" placeholder="user@gmail.com">
-    </div>
-    <div>
-      <label>Duration</label>
-      <select id="grantDays">
-        <option value="30">30 days</option>
-        <option value="90">90 days</option>
-        <option value="365">1 year</option>
-        <option value="0">Permanent</option>
-      </select>
-    </div>
-    <button onclick="grantManual()">Grant Pro Access</button>
-  </div>
-
-  <table>
-    <thead><tr>
-      <th>Email</th><th>Name</th><th>Status</th><th>Stripe ID</th><th>Joined</th><th>Actions</th>
-    </tr></thead>
-    <tbody>{rows_html}</tbody>
-  </table>
-
-  <div id="toast"></div>
-
-  <script>
-    const SECRET = '{secret}';
-    function toast(msg, ok=true) {{
-      const t = document.getElementById('toast');
-      t.textContent = msg;
-      t.style.background = ok ? '#22c55e' : '#ef4444';
-      t.style.color = ok ? '#000' : '#fff';
-      t.style.display = 'block';
-      setTimeout(() => {{ t.style.display = 'none'; location.reload(); }}, 1800);
-    }}
-    async function grantPro(email) {{
-      const days = 30;
-      const r = await fetch(`/admin/grant?secret=${{SECRET}}&email=${{encodeURIComponent(email)}}&days=${{days}}`, {{method:'POST'}});
-      const d = await r.json();
-      toast(d.granted ? `✓ Pro granted: ${{email}}` : `Error: ${{JSON.stringify(d)}}`, d.granted);
-    }}
-    async function revokePro(email) {{
-      if (!confirm(`Revoke Pro for ${{email}}?`)) return;
-      const r = await fetch(`/admin/revoke?secret=${{SECRET}}&email=${{encodeURIComponent(email)}}`, {{method:'POST'}});
-      const d = await r.json();
-      toast(d.revoked ? `✓ Revoked: ${{email}}` : `Error`, d.revoked);
-    }}
-    async function grantManual() {{
-      const email = document.getElementById('grantEmail').value.trim();
-      const days  = document.getElementById('grantDays').value;
-      if (!email) {{ alert('Enter an email'); return; }}
-      const r = await fetch(`/admin/grant?secret=${{SECRET}}&email=${{encodeURIComponent(email)}}&days=${{days}}`, {{method:'POST'}});
-      const d = await r.json();
-      toast(d.granted ? `✓ Pro granted: ${{email}}` : `Error: ${{JSON.stringify(d)}}`, d.granted);
-    }}
-  </script>
-</body>
-</html>"""
-    return HTMLResponse(html)
-
 @app.get("/admin/users")
 async def admin_users(req: Request, secret: str = Query(...)):
-    """View all users as JSON. /admin/users?secret=FIRST16CHARS"""
+    """View all users. Visit: /admin/users?secret=FIRST16CHARS_OF_SECRET_KEY"""
     if secret != SECRET_KEY[:16]:
         raise HTTPException(403, "Forbidden")
     import datetime
@@ -521,29 +367,13 @@ async def admin_users(req: Request, secret: str = Query(...)):
     return JSONResponse({"count": len(rows), "users": rows})
 
 @app.post("/admin/grant")
-async def admin_grant(req: Request, secret: str = Query(...), email: str = Query(...),
-                      days: int = Query(30)):
-    """Grant Pro access. days=0 means permanent. POST /admin/grant?secret=xxx&email=user@gmail.com&days=30"""
+async def admin_grant(req: Request, secret: str = Query(...), email: str = Query(...)):
+    """Manually grant 30-day premium. POST /admin/grant?secret=xxx&email=user@gmail.com"""
     if secret != SECRET_KEY[:16]:
         raise HTTPException(403, "Forbidden")
-    email = email.lower().strip()
-    if days == 0:
-        await db_grant_permanent_premium(email)
-        log.info(f"Admin granted permanent Pro: {email}")
-    else:
-        sub_end = int(time.time()) + 86400 * days
-        await db_grant_premium(email, "manual", "manual", sub_end)
-        log.info(f"Admin granted {days}-day Pro: {email}")
-    return JSONResponse({"granted": True, "email": email, "days": days or "permanent"})
-
-@app.post("/admin/revoke")
-async def admin_revoke(req: Request, secret: str = Query(...), email: str = Query(...)):
-    """Revoke Pro access. POST /admin/revoke?secret=xxx&email=user@gmail.com"""
-    if secret != SECRET_KEY[:16]:
-        raise HTTPException(403, "Forbidden")
-    await db_revoke_premium(email.lower().strip())
-    log.info(f"Admin revoked Pro: {email}")
-    return JSONResponse({"revoked": True, "email": email})
+    sub_end = int(time.time()) + 86400 * 30
+    await db_grant_premium(email, "manual", "manual", sub_end)
+    return JSONResponse({"granted": True, "email": email})
 
 @app.post("/admin/reset_customer")
 async def admin_reset_customer(req: Request, secret: str = Query(...), email: str = Query(...)):
